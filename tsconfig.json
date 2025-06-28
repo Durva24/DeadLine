@@ -20,8 +20,14 @@
     ],
     "paths": {
       "@/*": ["./*"]
-    }
+    },
+    "types": [] // 🔧 Removed problematic entries like 'estree', 'phoenix', etc.
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }
