@@ -154,7 +154,7 @@ async function scrapeArticle(url: string): Promise<ScrapedArticle | null> {
   }
 }
 
-// Enhanced image search function
+// Enhanced image search function - FIXED VERSION
 async function searchImages(query: string): Promise<string[]> {
   const API_KEY = process.env.GOOGLE_API_KEY;
   const SEARCH_ENGINE_ID = process.env.GOOGLE_SEARCH_ENGINE_ID;
@@ -166,7 +166,8 @@ async function searchImages(query: string): Promise<string[]> {
 
   try {
     console.log('Searching for images...');
-    const imageSearchUrl = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=10&safe=active&imgType=news&imgSize=medium&dateRestrict=m12`;
+    // REMOVED dateRestrict parameter to get all images, not just recent ones
+    const imageSearchUrl = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=10&safe=active&imgType=news&imgSize=medium`;
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
@@ -205,22 +206,28 @@ async function searchImages(query: string): Promise<string[]> {
       return [];
     }
 
+    // IMPROVED filtering - less restrictive
     const imageLinks = imageData.items
       .map((item: any) => item.link)
       .filter(Boolean)
       .filter((link: string) => {
         const url = link.toLowerCase();
-        // Filter out common non-news image types
-        return !url.includes('favicon') && 
-               !url.includes('logo') && 
-               !url.includes('avatar') &&
-               !url.includes('icon') &&
-               !url.includes('thumbnail') &&
-               (url.includes('.jpg') || url.includes('.jpeg') || url.includes('.png') || url.includes('.webp'));
+        // More lenient filtering - only exclude obvious non-content images
+        return !url.includes('favicon.ico') && 
+               !url.includes('/logo.') && 
+               !url.includes('/icon.') &&
+               // Accept more image formats and don't require specific extensions
+               (url.includes('.jpg') || url.includes('.jpeg') || url.includes('.png') || 
+                url.includes('.webp') || url.includes('.gif') || url.includes('.bmp') ||
+                url.includes('image') || url.includes('photo') || url.includes('pic'));
       })
-      .slice(0, 8); // Get up to 8 images
+      .slice(0, 10); // Get up to 10 images instead of 8
 
     console.log(`Found ${imageLinks.length} valid image links`);
+    
+    // Log the actual image URLs for debugging
+    console.log('Image URLs found:', imageLinks);
+    
     return imageLinks;
 
   } catch (error) {
@@ -332,13 +339,14 @@ async function searchGoogleAndScrape(query: string): Promise<ScrapedData> {
 
     console.log(`Successfully scraped ${successfulArticles.length} articles`);
 
-    // Search for images separately
+    // Search for images separately - this will now return more results
     const imageLinks = await searchImages(query);
+    console.log(`Image search completed. Found ${imageLinks.length} image URLs`);
 
     return { 
       results: newsResults, 
       articles: successfulArticles,
-      images: imageLinks
+      images: imageLinks // This should now contain actual image URLs
     };
 
   } catch (error) {
@@ -482,6 +490,12 @@ async function fetchEventFromDatabase(event_id: string) {
 }
 
 async function saveEventDetails(event_id: string, structuredData: EventDetails) {
+  // Log the data being saved for debugging
+  console.log(`Saving event details for ${event_id}:`);
+  console.log(`- Sources: ${structuredData.sources.length} URLs`);
+  console.log(`- Images: ${structuredData.images.length} URLs`);
+  console.log('Image URLs:', structuredData.images);
+
   // Check if record exists
   const { data: existingDetails, error: checkError } = await supabase
     .from('event_details')
@@ -502,7 +516,7 @@ async function saveEventDetails(event_id: string, structuredData: EventDetails) 
         victims: structuredData.victims,
         timeline: structuredData.timeline,
         sources: structuredData.sources,
-        images: structuredData.images,
+        images: structuredData.images, // This should now contain actual URLs
         updated_at: new Date().toISOString()
       })
       .eq('event_id', event_id);
@@ -519,7 +533,7 @@ async function saveEventDetails(event_id: string, structuredData: EventDetails) 
         victims: structuredData.victims,
         timeline: structuredData.timeline,
         sources: structuredData.sources,
-        images: structuredData.images,
+        images: structuredData.images, // This should now contain actual URLs
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       });
@@ -530,6 +544,8 @@ async function saveEventDetails(event_id: string, structuredData: EventDetails) 
     console.error('Database save error:', saveError);
     throw new Error(`Failed to save event details: ${saveError.message}`);
   }
+  
+  console.log('Successfully saved event details to database');
 }
 
 async function updateEventTimestamp(event_id: string) {
@@ -574,7 +590,7 @@ async function processEvent(event_id: string) {
   const structuredData: EventDetails = {
     ...analyzedData,
     sources: scrapedSourceUrls, // Use actual scraped URLs as sources
-    images: scrapedData.images
+    images: scrapedData.images // This should now contain actual image URLs
   };
 
   console.log('Article analysis completed successfully');
@@ -634,6 +650,10 @@ export async function GET(request: NextRequest) {
         victims_count: structuredData.victims.length,
         timeline_events: structuredData.timeline.length,
         total_article_content_length: scrapedData.articles.reduce((sum, article) => sum + article.content.length, 0)
+      },
+      debug_info: {
+        image_urls_found: structuredData.images,
+        total_images: structuredData.images.length
       }
     });
 
