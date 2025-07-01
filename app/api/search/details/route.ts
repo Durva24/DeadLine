@@ -47,17 +47,16 @@ interface ScrapedData {
   images: string[];
 }
 
-// JSON template for Groq to follow - Fixed typing
+// JSON template for Groq to follow (removed sources from template)
 const EVENT_DETAILS_TEMPLATE: Record<string, any> = {
   location: "string - Specific location where the event occurred (city, state, country)",
   details: "string - Comprehensive description of what happened, including context and circumstances",
   accused: ["array of strings - Names and descriptions of accused parties or perpetrators"],
   victims: ["array of strings - Names and descriptions of victims or affected parties"],
-  timeline: ["array of strings - Chronological sequence of events with dates/times when available"],
-  sources: ["array of strings - URLs and references to credible sources"]
+  timeline: ["array of strings - Chronological sequence of events with dates/times when available"]
 };
 
-// Validate JSON response
+// Utility Functions
 function isValidJSON(str: string): boolean {
   try {
     JSON.parse(str);
@@ -67,13 +66,12 @@ function isValidJSON(str: string): boolean {
   }
 }
 
-// Check if response is HTML
 function isHTMLResponse(response: string): boolean {
   return response.trim().toLowerCase().startsWith('<!doctype') || 
          response.trim().toLowerCase().startsWith('<html');
 }
 
-// Simple HTML content extraction without cheerio
+// Simple HTML content extraction without external dependencies
 function extractArticleContent(html: string, url: string): ScrapedArticle {
   // Remove script and style tags
   let cleanHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
@@ -156,7 +154,82 @@ async function scrapeArticle(url: string): Promise<ScrapedArticle | null> {
   }
 }
 
-// Enhanced Google Custom Search API function - single call for 30 results
+// Enhanced image search function
+async function searchImages(query: string): Promise<string[]> {
+  const API_KEY = process.env.GOOGLE_API_KEY;
+  const SEARCH_ENGINE_ID = process.env.GOOGLE_SEARCH_ENGINE_ID;
+  
+  if (!API_KEY || !SEARCH_ENGINE_ID) {
+    console.warn('Google API credentials not configured for image search');
+    return [];
+  }
+
+  try {
+    console.log('Searching for images...');
+    const imageSearchUrl = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=10&safe=active&imgType=news&imgSize=medium&dateRestrict=m12`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+    
+    const imageResponse = await fetch(imageSearchUrl, {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    clearTimeout(timeoutId);
+
+    if (!imageResponse.ok) {
+      console.warn(`Image search failed with status: ${imageResponse.status}`);
+      return [];
+    }
+
+    const imageResponseText = await imageResponse.text();
+    
+    if (!isValidJSON(imageResponseText) || isHTMLResponse(imageResponseText)) {
+      console.warn('Invalid JSON response from image search');
+      return [];
+    }
+
+    const imageData = JSON.parse(imageResponseText);
+    
+    if (imageData.error) {
+      console.warn('Image search API error:', imageData.error);
+      return [];
+    }
+
+    if (!imageData.items || !Array.isArray(imageData.items)) {
+      console.warn('No image items found in response');
+      return [];
+    }
+
+    const imageLinks = imageData.items
+      .map((item: any) => item.link)
+      .filter(Boolean)
+      .filter((link: string) => {
+        const url = link.toLowerCase();
+        // Filter out common non-news image types
+        return !url.includes('favicon') && 
+               !url.includes('logo') && 
+               !url.includes('avatar') &&
+               !url.includes('icon') &&
+               !url.includes('thumbnail') &&
+               (url.includes('.jpg') || url.includes('.jpeg') || url.includes('.png') || url.includes('.webp'));
+      })
+      .slice(0, 8); // Get up to 8 images
+
+    console.log(`Found ${imageLinks.length} valid image links`);
+    return imageLinks;
+
+  } catch (error) {
+    console.warn('Image search error:', error);
+    return [];
+  }
+}
+
+// Enhanced Google Custom Search API function
 async function searchGoogleAndScrape(query: string): Promise<ScrapedData> {
   const API_KEY = process.env.GOOGLE_API_KEY;
   const SEARCH_ENGINE_ID = process.env.GOOGLE_SEARCH_ENGINE_ID;
@@ -167,7 +240,6 @@ async function searchGoogleAndScrape(query: string): Promise<ScrapedData> {
 
   try {
     const allResults: GoogleSearchResult[] = [];
-    const allImages: string[] = [];
 
     // Get 30 search results in 3 batches of 10 (Google API limit per request is 10)
     for (let page = 1; page <= 3; page++) {
@@ -214,7 +286,7 @@ async function searchGoogleAndScrape(query: string): Promise<ScrapedData> {
         allResults.push(...pageResults);
         console.log(`Page ${page}: Found ${pageResults.length} results`);
 
-        // Small delay between requests
+        // Small delay between requests to avoid rate limits
         if (page < 3) {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
@@ -260,44 +332,13 @@ async function searchGoogleAndScrape(query: string): Promise<ScrapedData> {
 
     console.log(`Successfully scraped ${successfulArticles.length} articles`);
 
-    // Search for images - single request for 8 images
-    console.log('Searching for images...');
-    try {
-      const imageSearchUrl = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=8&safe=active&imgType=news`;
-      
-      const imageResponse = await fetch(imageSearchUrl);
-
-      if (imageResponse.ok) {
-        const imageResponseText = await imageResponse.text();
-        
-        if (isValidJSON(imageResponseText) && !isHTMLResponse(imageResponseText)) {
-          const imageData = JSON.parse(imageResponseText);
-          
-          if (!imageData.error && imageData.items) {
-            const imageLinks = imageData.items
-              .map((item: any) => item.link)
-              .filter(Boolean)
-              .filter((link: string) => {
-                const url = link.toLowerCase();
-                return !url.includes('favicon') && 
-                       !url.includes('logo') && 
-                       !url.includes('avatar') &&
-                       (url.includes('.jpg') || url.includes('.jpeg') || url.includes('.png') || url.includes('.webp'));
-              })
-              .slice(0, 4);
-            
-            allImages.push(...imageLinks);
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('Image search failed:', error);
-    }
+    // Search for images separately
+    const imageLinks = await searchImages(query);
 
     return { 
       results: newsResults, 
       articles: successfulArticles,
-      images: allImages.slice(0, 4)
+      images: imageLinks
     };
 
   } catch (error) {
@@ -311,7 +352,7 @@ async function searchGoogleAndScrape(query: string): Promise<ScrapedData> {
 }
 
 // Function to process scraped article data with Groq Llama 70B
-async function processArticlesWithGroq(scrapedData: ScrapedData, query: string): Promise<Omit<EventDetails, 'images'>> {
+async function processArticlesWithGroq(scrapedData: ScrapedData, query: string): Promise<Omit<EventDetails, 'images' | 'sources'>> {
   // Prepare article content for analysis
   const articleContent = scrapedData.articles.map((article, index) => {
     return `
@@ -358,11 +399,11 @@ CRITICAL ANALYSIS INSTRUCTIONS:
    - "accused": Extract ALL names, ages, titles, and detailed descriptions of accused individuals
    - "victims": Extract ALL names, ages, and detailed descriptions of victims
    - "timeline": Create a detailed chronological sequence with specific dates and times from articles
-   - "sources": Include ALL article URLs that contain relevant information
 4. ACCURACY FIRST: Only include information explicitly stated in the provided content
 5. RESOLVE CONFLICTS: When articles provide conflicting information, note the discrepancy
 6. NO SPECULATION: If specific information isn't available, use empty strings or arrays
 7. PROPER JSON: Ensure all text is properly escaped for JSON format
+8. DO NOT generate or include source URLs - they will be handled separately
 
 Focus on creating the most accurate and comprehensive analysis possible using the full article content provided.
 
@@ -394,7 +435,6 @@ JSON Response:`;
     if (jsonStart === -1 || jsonEnd === 0) {
       throw new Error('Invalid JSON response from Groq - no JSON object found');
     }
-
     const jsonString = cleanedResponse.substring(jsonStart, jsonEnd);
     
     if (!isValidJSON(jsonString)) {
@@ -403,14 +443,13 @@ JSON Response:`;
 
     const parsedData = JSON.parse(jsonString);
     
-    // Validate the structure - Fixed TypeScript error
-    const requiredFields: (keyof typeof EVENT_DETAILS_TEMPLATE)[] = ['location', 'details', 'accused', 'victims', 'timeline', 'sources'];
+    // Validate the structure
+    const requiredFields: (keyof typeof EVENT_DETAILS_TEMPLATE)[] = ['location', 'details', 'accused', 'victims', 'timeline'];
     for (const field of requiredFields) {
       if (!(field in parsedData)) {
         parsedData[field] = Array.isArray(EVENT_DETAILS_TEMPLATE[field]) ? [] : '';
       }
     }
-
     return parsedData;
   } catch (error) {
     console.error('Groq processing error:', error);
@@ -420,6 +459,140 @@ JSON Response:`;
       throw new Error('Failed to process data with Groq API: Unknown error');
     }
   }
+}
+
+// Database Operations
+async function fetchEventFromDatabase(event_id: string) {
+  const { data: eventData, error: fetchError } = await supabase
+    .from('events')
+    .select('query, title')
+    .eq('event_id', event_id)
+    .single();
+  if (fetchError) {
+    console.error('Event fetch error:', fetchError);
+    throw new Error(`Event not found in events table: ${fetchError.message}`);
+  }
+  if (!eventData) {
+    throw new Error('Event not found in events table');
+  }
+  if (!eventData.query) {
+    throw new Error('No query attribute found for this event');
+  }
+  return eventData;
+}
+
+async function saveEventDetails(event_id: string, structuredData: EventDetails) {
+  // Check if record exists
+  const { data: existingDetails, error: checkError } = await supabase
+    .from('event_details')
+    .select('event_id')
+    .eq('event_id', event_id)
+    .single();
+
+  let dbOperation;
+  if (existingDetails && !checkError) {
+    // Update existing record
+    console.log('Updating existing record in event_details table...');
+    dbOperation = supabase
+      .from('event_details')
+      .update({
+        location: structuredData.location,
+        details: structuredData.details,
+        accused: structuredData.accused,
+        victims: structuredData.victims,
+        timeline: structuredData.timeline,
+        sources: structuredData.sources,
+        images: structuredData.images,
+        updated_at: new Date().toISOString()
+      })
+      .eq('event_id', event_id);
+  } else {
+    // Insert new record
+    console.log('Inserting new record into event_details table...');
+    dbOperation = supabase
+      .from('event_details')
+      .insert({
+        event_id: event_id,
+        location: structuredData.location,
+        details: structuredData.details,
+        accused: structuredData.accused,
+        victims: structuredData.victims,
+        timeline: structuredData.timeline,
+        sources: structuredData.sources,
+        images: structuredData.images,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+  }
+  const { error: saveError } = await dbOperation;
+
+  if (saveError) {
+    console.error('Database save error:', saveError);
+    throw new Error(`Failed to save event details: ${saveError.message}`);
+  }
+}
+
+async function updateEventTimestamp(event_id: string) {
+  const { error: updateError } = await supabase
+    .from('events')
+    .update({ last_updated: new Date().toISOString() })
+    .eq('event_id', event_id);
+
+  if (updateError) {
+    console.warn('Failed to update last_updated in events table:', updateError);
+  }
+}
+
+// Core processing function
+async function processEvent(event_id: string) {
+  console.log(`Processing event: ${event_id}`);
+
+  // Step 1: Fetch event and query from Supabase events table
+  const eventData = await fetchEventFromDatabase(event_id);
+  console.log(`Found event: ${eventData.title}`);
+  console.log(`Using query: ${eventData.query}`);
+
+  // Step 2: Search Google and scrape articles
+  console.log(`Searching and scraping articles for query: ${eventData.query}`);
+  const scrapedData = await searchGoogleAndScrape(eventData.query);
+
+  if (!scrapedData.articles || scrapedData.articles.length === 0) {
+    throw new Error('No article content could be scraped from search results');
+  }
+
+  console.log(`Successfully scraped ${scrapedData.articles.length} articles and found ${scrapedData.images.length} images`);
+
+  // Step 3: Process scraped article data with Groq
+  console.log(`Processing ${scrapedData.articles.length} articles with Groq...`);
+  const analyzedData = await processArticlesWithGroq(scrapedData, eventData.query);
+
+  // Step 4: Combine analyzed data with images and scraped sources
+  const scrapedSourceUrls = scrapedData.articles
+    .filter(article => article.url && article.content.length > 100)
+    .map(article => article.url);
+
+  const structuredData: EventDetails = {
+    ...analyzedData,
+    sources: scrapedSourceUrls, // Use actual scraped URLs as sources
+    images: scrapedData.images
+  };
+
+  console.log('Article analysis completed successfully');
+  console.log(`Collected ${scrapedSourceUrls.length} source URLs and ${scrapedData.images.length} image URLs`);
+
+  // Step 5: Save to event_details table
+  await saveEventDetails(event_id, structuredData);
+
+  // Step 6: Update last_updated timestamp in events table
+  await updateEventTimestamp(event_id);
+
+  console.log('Successfully analyzed event articles and saved all details to database');
+
+  return {
+    eventData,
+    structuredData,
+    scrapedData
+  };
 }
 
 // Main GET endpoint
@@ -437,7 +610,6 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       );
     }
-
     // Validate event_id
     if (!event_id) {
       return NextResponse.json(
@@ -445,132 +617,8 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    console.log(`Processing event: ${event_id}`);
-
-    // Step 1: Fetch event and query from Supabase events table
-    const { data: eventData, error: fetchError } = await supabase
-      .from('events')
-      .select('query, title')
-      .eq('event_id', event_id)
-      .single();
-
-    if (fetchError) {
-      console.error('Event fetch error:', fetchError);
-      return NextResponse.json(
-        { error: `Event not found in events table: ${fetchError.message}` },
-        { status: 404 }
-      );
-    }
-
-    if (!eventData) {
-      return NextResponse.json(
-        { error: 'Event not found in events table' },
-        { status: 404 }
-      );
-    }
-
-    if (!eventData.query) {
-      return NextResponse.json(
-        { error: 'No query attribute found for this event' },
-        { status: 400 }
-      );
-    }
-
-    console.log(`Found event: ${eventData.title}`);
-    console.log(`Using query: ${eventData.query}`);
-
-    // Step 2: Search Google and scrape articles with single query approach
-    console.log(`Searching and scraping articles for query: ${eventData.query}`);
-    const scrapedData = await searchGoogleAndScrape(eventData.query);
-
-    if (!scrapedData.articles || scrapedData.articles.length === 0) {
-      return NextResponse.json(
-        { error: 'No article content could be scraped from search results' },
-        { status: 404 }
-      );
-    }
-
-    console.log(`Successfully scraped ${scrapedData.articles.length} articles and found ${scrapedData.images.length} images`);
-
-    // Step 3: Process scraped article data with Groq
-    console.log(`Processing ${scrapedData.articles.length} articles with Groq...`);
-    const analyzedData = await processArticlesWithGroq(scrapedData, eventData.query);
-
-    // Step 4: Combine analyzed data with images
-    const structuredData: EventDetails = {
-      ...analyzedData,
-      images: scrapedData.images
-    };
-
-    console.log('Article analysis completed successfully');
-
-    // Step 5: Save to event_details table
-    const { data: existingDetails, error: checkError } = await supabase
-      .from('event_details')
-      .select('event_id')
-      .eq('event_id', event_id)
-      .single();
-
-    let dbOperation;
-    if (existingDetails && !checkError) {
-      // Update existing record
-      console.log('Updating existing record in event_details table...');
-      dbOperation = supabase
-        .from('event_details')
-        .update({
-          location: structuredData.location,
-          details: structuredData.details,
-          accused: structuredData.accused,
-          victims: structuredData.victims,
-          timeline: structuredData.timeline,
-          sources: structuredData.sources,
-          images: structuredData.images,
-          updated_at: new Date().toISOString()
-        })
-        .eq('event_id', event_id);
-    } else {
-      // Insert new record
-      console.log('Inserting new record into event_details table...');
-      dbOperation = supabase
-        .from('event_details')
-        .insert({
-          event_id: event_id,
-          location: structuredData.location,
-          details: structuredData.details,
-          accused: structuredData.accused,
-          victims: structuredData.victims,
-          timeline: structuredData.timeline,
-          sources: structuredData.sources,
-          images: structuredData.images,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-    }
-
-    const { error: saveError } = await dbOperation;
-
-    if (saveError) {
-      console.error('Database save error:', saveError);
-      return NextResponse.json(
-        { error: `Failed to save event details: ${saveError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Step 6: Update last_updated timestamp in events table
-    const { error: updateError } = await supabase
-      .from('events')
-      .update({ last_updated: new Date().toISOString() })
-      .eq('event_id', event_id);
-
-    if (updateError) {
-      console.warn('Failed to update last_updated in events table:', updateError);
-    }
-
-    console.log('Successfully analyzed event articles and saved all details to database');
-
-    // Return success response
+    const { eventData, structuredData, scrapedData } = await processEvent(event_id);
+    // Return success response with comprehensive data
     return NextResponse.json({
       success: true,
       message: "Event analyzed and saved successfully",
@@ -615,87 +663,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`Processing event via POST: ${event_id}`);
 
-    // Follow same logic as GET endpoint
-    const { data: eventData, error: fetchError } = await supabase
-      .from('events')
-      .select('query, title')
-      .eq('event_id', event_id)
-      .single();
-
-    if (fetchError || !eventData || !eventData.query) {
-      return NextResponse.json(
-        { error: 'Event not found or missing query' },
-        { status: 404 }
-      );
-    }
-
-    const scrapedData = await searchGoogleAndScrape(eventData.query);
-
-    if (!scrapedData.articles || scrapedData.articles.length === 0) {
-      return NextResponse.json(
-        { error: 'No article content could be scraped' },
-        { status: 404 }
-      );
-    }
-
-    const analyzedData = await processArticlesWithGroq(scrapedData, eventData.query);
-    const structuredData: EventDetails = {
-      ...analyzedData,
-      images: scrapedData.images
-    };
-
-    // Save to database
-    const { data: existingDetails, error: checkError } = await supabase
-      .from('event_details')
-      .select('event_id')
-      .eq('event_id', event_id)
-      .single();
-
-    let dbOperation;
-    if (existingDetails && !checkError) {
-      dbOperation = supabase
-        .from('event_details')
-        .update({
-          location: structuredData.location,
-          details: structuredData.details,
-          accused: structuredData.accused,
-          victims: structuredData.victims,
-          timeline: structuredData.timeline,
-          sources: structuredData.sources,
-          images: structuredData.images,
-          updated_at: new Date().toISOString()
-        })
-        .eq('event_id', event_id);
-    } else {
-      dbOperation = supabase
-        .from('event_details')
-        .insert({
-          event_id: event_id,
-          location: structuredData.location,
-          details: structuredData.details,
-          accused: structuredData.accused,
-          victims: structuredData.victims,
-          timeline: structuredData.timeline,
-          sources: structuredData.sources,
-          images: structuredData.images,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-    }
-
-    const { error: saveError } = await dbOperation;
-
-    if (saveError) {
-      return NextResponse.json(
-        { error: `Failed to save event details: ${saveError.message}` },
-        { status: 500 }
-      );
-    }
-
-    await supabase
-      .from('events')
-      .update({ last_updated: new Date().toISOString() })
-      .eq('event_id', event_id);
+    const { eventData, structuredData, scrapedData } = await processEvent(event_id);
 
     return NextResponse.json({
       success: true,
