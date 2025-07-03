@@ -1,19 +1,15 @@
 // app/components/event/event-updates.tsx
 'use client'
-
 import { format } from 'date-fns'
-
 type Update = {
   id: string
   update_date: string
   content: string
   source_link: string
 }
-
 export default function EventUpdates({ updates }: { updates: Update[] }) {
   if (!updates || updates.length === 0)
     return <p className="text-gray-500 italic mt-6">No updates available.</p>
-
   return (
     <section className="border-l-2 border-indigo-500 pl-4 mt-6">
       {updates.map(update => (

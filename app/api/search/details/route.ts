@@ -13,7 +13,6 @@ const groq = new Groq({
 });
 
 const API_SECRET_KEY = process.env.API_SECRET_KEY;
-
 // Types
 interface EventDetails {
   location: string;
@@ -65,7 +64,6 @@ function isValidJSON(str: string): boolean {
     return false;
   }
 }
-
 function isHTMLResponse(response: string): boolean {
   return response.trim().toLowerCase().startsWith('<!doctype') || 
          response.trim().toLowerCase().startsWith('<html');
@@ -127,7 +125,6 @@ async function scrapeArticle(url: string): Promise<ScrapedArticle | null> {
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -139,12 +136,10 @@ async function scrapeArticle(url: string): Promise<ScrapedArticle | null> {
     });
     
     clearTimeout(timeoutId);
-    
     if (!response.ok) {
       console.warn(`Failed to fetch ${url}: ${response.status}`);
       return null;
     }
-    
     const html = await response.text();
     return extractArticleContent(html, url);
     
@@ -153,7 +148,6 @@ async function scrapeArticle(url: string): Promise<ScrapedArticle | null> {
     return null;
   }
 }
-
 // Enhanced image search function - FIXED VERSION
 async function searchImages(query: string): Promise<string[]> {
   const API_KEY = process.env.GOOGLE_API_KEY;
@@ -163,15 +157,12 @@ async function searchImages(query: string): Promise<string[]> {
     console.warn('Google API credentials not configured for image search');
     return [];
   }
-
   try {
     console.log('Searching for images...');
     // REMOVED dateRestrict parameter to get all images, not just recent ones
-    const imageSearchUrl = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=10&safe=active&imgType=news&imgSize=medium`;
-    
+    const imageSearchUrl = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=10&safe=active&imgType=news&imgSize=medium`; 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-    
     const imageResponse = await fetch(imageSearchUrl, {
       signal: controller.signal,
       headers: {
