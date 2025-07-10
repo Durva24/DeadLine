@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.50.2",
+    "@supabase/supabase-js": "^2.50.4",
     "cheerio": "^1.1.0",
     "css-select": "^5.2.1",
     "date-fns": "^4.1.0",
