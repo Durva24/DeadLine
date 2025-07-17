@@ -27,13 +27,14 @@ const supabase = createClient(
 // For Pages Router (pages/api/events.ts)
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse
+  res: NextApiResponse<{ events: Event[] } | { error: string }>
 ) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
   try {
+    // Fetch all events from the database, ordered by last_updated (newest first)
     const { data: events, error } = await supabase
       .from('events')
       .select('*')
@@ -44,7 +45,8 @@ export default async function handler(
       return res.status(500).json({ error: 'Failed to fetch events' })
     }
 
-    return res.status(200).json({ events })
+    // Return all events
+    return res.status(200).json({ events: events || [] })
   } catch (error) {
     console.error('API error:', error)
     return res.status(500).json({ error: 'Internal server error' })
@@ -54,6 +56,7 @@ export default async function handler(
 // For App Router (app/api/events/route.ts)
 export async function GET() {
   try {
+    // Fetch all events from the database, ordered by last_updated (newest first)
     const { data: events, error } = await supabase
       .from('events')
       .select('*')
@@ -64,7 +67,8 @@ export async function GET() {
       return Response.json({ error: 'Failed to fetch events' }, { status: 500 })
     }
 
-    return Response.json({ events })
+    // Return all events
+    return Response.json({ events: events || [] })
   } catch (error) {
     console.error('API error:', error)
     return Response.json({ error: 'Internal server error' }, { status: 500 })

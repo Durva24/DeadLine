@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 
 interface Event {
   event_id: number;
   title: string;
-  image_url: string;
+  image_url: string | null;
   status: string;
-  tags: string[];
-  query: string;
-  summary: string;
-  last_updated: string;
-  incident_date: string;
+  tags: string[] | null;
+  query: string | null;
+  summary: string | null;
+  last_updated: string | null;
+  incident_date: string | null;
 }
 
 interface EventsResponse {
@@ -23,11 +24,12 @@ export default function EventsPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const response = await fetch('/api/get/events?event_id=1');
+        const response = await fetch('/api/get/events');
         if (!response.ok) {
           throw new Error('Failed to fetch events');
         }
@@ -43,7 +45,8 @@ export default function EventsPage() {
     fetchEvents();
   }, []);
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'No date available';
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
@@ -62,6 +65,10 @@ export default function EventsPage() {
       default:
         return 'bg-gray-100 text-gray-800';
     }
+  };
+
+  const handleEventClick = (eventId: number) => {
+    router.push(`/event/${eventId}`);
   };
 
   if (loading) {
@@ -96,13 +103,17 @@ export default function EventsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {events.map((event) => (
-            <div key={event.event_id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
+            <div 
+              key={event.event_id} 
+              onClick={() => handleEventClick(event.event_id)}
+              className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 cursor-pointer group"
+            >
               <div className="relative h-48">
                 <Image
-                  src={event.image_url}
+                  src={event.image_url || '/api/placeholder/400/200'}
                   alt={event.title}
                   fill
-                  className="object-cover"
+                  className="object-cover group-hover:scale-105 transition-transform duration-300"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
                     target.src = '/api/placeholder/400/200';
@@ -120,29 +131,31 @@ export default function EventsPage() {
                   </span>
                 </div>
 
-                <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors">
                   {event.title}
                 </h3>
 
                 <p className="text-gray-600 text-sm mb-4 line-clamp-3">
-                  {event.summary}
+                  {event.summary || 'No summary available'}
                 </p>
 
-                <div className="flex flex-wrap gap-1 mb-4">
-                  {event.tags.slice(0, 3).map((tag, index) => (
-                    <span
-                      key={index}
-                      className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                  {event.tags.length > 3 && (
-                    <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                      +{event.tags.length - 3} more
-                    </span>
-                  )}
-                </div>
+                {event.tags && event.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-4">
+                    {event.tags.slice(0, 3).map((tag, index) => (
+                      <span
+                        key={index}
+                        className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                    {event.tags.length > 3 && (
+                      <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
+                        +{event.tags.length - 3} more
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div className="text-xs text-gray-500">
                   Last updated: {formatDate(event.last_updated)}
